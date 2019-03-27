@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ota-kube
+spec:
+  template:
+    metadata:
+      labels:
+        app: ota-kube
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ota-kube
+          image: bclouser/ota-kube:latest
+          command: ["/usr/local/bin/ota-kube"]
+          envFrom:
+          - configMapRef:
+              name: ota-env
+          env:
+          - name: CREDENTIALS_DIR
+            value: /opt/storage/ota
+          ports:
+          - name: http-port
+            containerPort: 8080
+          tty: true
+          stdin: true
+          volumeMounts:
+          - name: ota-kube-volume
+            mountPath: /opt/storage/ota
+            subPath: ota-kube
+      dnsPolicy: "ClusterFirst"
+      volumes:
+       - name: ota-kube-volume
+         persistentVolumeClaim:
+           claimName: ota-kube-claim
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ota-kube-pv
+  namespace: default
+  labels:
+    app: ota-kube
+    id: ota-kube-pv
+    type: nfs-volume
+spec:
+  capacity:
+    storage: 50Mi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 10.12.254.41
+    path: //vol_kubenfs6/ota
+    readOnly: false
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: ota-kube-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 50Mi
+  selector:
+    matchLabels:
+      app: ota-kube
+      id: ota-kube-pv

@@ -15,7 +15,6 @@ spec:
           ports:
             - name: http-port
               containerPort: 8080
-          command: ["ota-kube"]
           tty: true
           stdin: true
       dnsPolicy: "ClusterFirst"

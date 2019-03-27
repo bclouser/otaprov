@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path"
 	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -59,25 +60,44 @@ func main() {
 	fmt.Printf("Found Secret, user-keys:\n")
 	fmt.Printf("%s\n", userKeysSecret.Data)
 
-	type KeyPair struct {
-		Public string
-		Private string
+
+	// I have these two (nearly identical) structs so that i can parse json and 
+	// remove the private and public keys respectively. Until I learn a better way.
+	type KeyDataPublic struct {
+		Keytype string `json:"keytype"`
+		Keyval struct {Public string `json:"public"`} `json:"keyval"`
 	}
-	type KeyData struct {
-		Keytype string
-		Keyval KeyPair
+	type KeyDataPrivate struct {
+		Keytype string `json:"keytype"`
+		Keyval struct {Private string `json:"private"`} `json:"keyval"`
 	}
 
 	// NOTE: This should pull directly from keyserver... currently this will stop working on a rollover
-	var keyData []KeyData;
-	err = json.Unmarshal([]byte(userKeysSecret.Data["keys"]), &keyData)
+	var keyDataPriv []KeyDataPrivate
+	var keyDataPub []KeyDataPublic
+	err = json.Unmarshal([]byte(userKeysSecret.Data["keys"]), &keyDataPriv)
 	if err != nil {
 		panic(err.Error())
 	}
-	fmt.Printf("targets.pub = %s\n", keyData[0].Keyval.Public)
-	fmt.Printf("targets.sec = %s\n", keyData[0].Keyval.Private)
-	filesToZip = append(filesToZip, FileSource{"targets.pub", keyData[0].Keyval.Public})
-	filesToZip = append(filesToZip, FileSource{"targets.sec", keyData[0].Keyval.Private})
+	err = json.Unmarshal([]byte(userKeysSecret.Data["keys"]), &keyDataPub)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	pubKeyJson, err := json.Marshal(keyDataPub[0])
+	if err != nil {
+		panic(err.Error())
+	}
+	privKeyJson, err := json.Marshal(keyDataPriv[0])
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Printf("targets.pub = %s\n", string(pubKeyJson))
+	fmt.Printf("targets.sec = %s\n", string(privKeyJson))
+
+	filesToZip = append(filesToZip, FileSource{"targets.pub", string(pubKeyJson)})
+	filesToZip = append(filesToZip, FileSource{"targets.sec", string(privKeyJson)})
 
 	// Collect root json directly from the reposerver API
 	response, err := http.Get("http://tuf-reposerver/api/v1/user_repo/root.json")
@@ -115,11 +135,9 @@ func main() {
      }`
      filesToZip = append(filesToZip, FileSource{"treehub.json", treehubJson})
 
-
-
-
+    credentialsPath := os.Getenv("CREDENTIALS_DIR")
     // Create the Zip File
-	zipFile, err := os.Create("credentials.zip")
+	zipFile, err := os.Create(path.Join(credentialsPath, "credentials.zip"))
     if err != nil {
         panic(err.Error())
     }
