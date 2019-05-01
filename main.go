@@ -12,6 +12,10 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"archive/zip"
+	"os/exec"
+	"bytes"
+	"io"
+	"github.com/satori/go.uuid"
 	//
 	// Uncomment to load all auth plugins
 	// _ "k8s.io/client-go/plugin/pkg/client/auth
@@ -30,7 +34,14 @@ type FileSource struct {
 	Body string
 }
 
-func main() {
+
+type Device struct {
+	Uuid string
+	ClientPrivKey string
+	ClientCertPem string
+}
+
+func createCredsZip() {
 	var filesToZip []FileSource
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -162,4 +173,154 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
+}
+
+func createDevice() (Device, error) {
+  // Poke Kubernetes API and attain device's ca.key and ca.rt from gateway-tls-secret
+  // creates the in-cluster config
+
+  	dev := Device{"", "", ""}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Get the gateway-tls secret
+	gatewayTlsSecret, err := clientset.CoreV1().Secrets(namespace).Get("gateway-tls", metav1.GetOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Printf("device ca.key: %s\n", string(gatewayTlsSecret.Data["ca.key"]))
+	fmt.Printf("device ca.crt: %s\n", string(gatewayTlsSecret.Data["ca.crt"]))
+
+	// Save these to the filesystem
+	dataPath := os.Getenv("DATA_PATH")
+	devicesDir := path.Join(dataPath, "/devices")
+
+	os.Mkdir(devicesDir, 0755)
+	fmt.Printf("Saving certificate to path: %s\n", devicesDir)
+	file := path.Join(devicesDir, "ca.key")
+	err = ioutil.WriteFile(file, []byte(gatewayTlsSecret.Data["ca.key"]), 0755)
+	if err != nil {
+		fmt.Printf("Failed to write ca.key")
+		panic(err.Error())
+	}
+	file = path.Join(devicesDir, "ca.crt")
+	err = ioutil.WriteFile(file, []byte(gatewayTlsSecret.Data["ca.crt"]), 0755)
+	if err != nil {
+		fmt.Printf("Failed to write ca.crt")
+		panic(err.Error())
+	}
+
+	id := uuid.Must(uuid.NewV4())
+	fmt.Printf("UUIDv4: %s\n", id)
+
+	// Append the first 8 bytes of the uuid to the device-id to keep it unique
+	uuidText,_ := id.MarshalText()
+	var deviceId string = "test-device-id-"+string(uuidText[:8])
+	fmt.Printf("deviceId: %s\n", deviceId)
+
+	// Run script to generate the necessary certs
+	cmd := exec.Command("/bin/bash", "/usr/local/bin/create-device.sh", id.String(), deviceId)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err = cmd.Run()
+
+	fmt.Printf("Output: %s\n", out.String())
+
+	if err != nil {
+		fmt.Printf("running create-device.sh script failed with err: %s\n", err.Error())
+		return dev, err
+	}
+	fmt.Printf("Script ran Successfully\n")
+
+
+	pkeyPem,_ := ioutil.ReadFile(path.Join(devicesDir, id.String(), "pkey.pem"))
+	clientPem,_ := ioutil.ReadFile(path.Join(devicesDir, id.String(), "client.pem"))
+	// Register device with OTA backend
+	// RESP_UUID=$(http --ignore-stdin --verify=no PUT "${device_registry}/api/v1/devices" credentials=@"${device_dir}/client.pem" \
+	//   deviceUuid="${DEVICE_UUID}" deviceId="${device_id}" deviceName="${device_id}" deviceType=Other "${KUBE_AUTH}")
+	//echo "The Device Registry responded with a UUID OF: ${RESP_UUID}"
+
+	type RequestBody struct {
+		Credentials string `json:"credentials"`
+		DeviceUUID string `json:"deviceUUID"`
+		DeviceId string `json:"deviceId"`
+		DeviceName string `json:"deviceName"`
+		DeviceType string `json:"deviceType"`
+	}
+
+	requestBody := RequestBody{string(clientPem), id.String(), deviceId, deviceId, "Other"}
+	var jsonBody []byte
+	jsonBody, err = json.Marshal(requestBody)
+	if err != nil {
+		fmt.Printf("Failed to Marshal json\n");
+		return dev, err
+	}
+
+	fmt.Printf("Here is the json string: %s\n", string(jsonBody))
+
+	client := &http.Client{}
+	req, err := http.NewRequest(http.MethodPut, "http://device-registry/api/v1/devices", bytes.NewReader(jsonBody))
+	if err != nil {
+		fmt.Printf("Failed to create put request\n")
+		return dev, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Failed PUT Request to the device-registry\n")
+		return dev, err
+	}
+
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(resp.Body)
+
+	if resp.StatusCode != 200 {
+		fmt.Printf("Status code not ok. Expected 200. got %s\n", resp.Status)
+		fmt.Printf("Response Body:\n %s\n", buf)
+	}
+
+	dev.Uuid=id.String()
+	dev.ClientPrivKey=string(pkeyPem)
+	dev.ClientCertPem=string(clientPem)
+
+  // return payload to device for provisioning.
+  return dev, nil
+}
+
+func getCredentialsZip(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, "Reached getCredentialsZip" + "\n")
+	fmt.Printf("getCredentialsZip\n")
+}
+
+func newDevice(w http.ResponseWriter, r *http.Request) {
+	device, err := createDevice()
+
+    resp := []byte("Command succeeded")
+	if err != nil {
+		resp = []byte("Command failed")
+	} else {
+		fmt.Printf("Ok, device uuid is %s\n", device.Uuid)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(resp)
+}
+
+func main() {
+	http.HandleFunc("/credentials.zip", getCredentialsZip)
+	http.HandleFunc("/create-device", newDevice)
+	http.ListenAndServe(":8000", nil)
 }
