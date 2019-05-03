@@ -18,6 +18,16 @@ spec:
               containerPort: 8000
           tty: true
           stdin: true
+          env: 
+            - name: CREDENTIALS_DIR
+              value: /data
+            - name: DNS_NAME
+              value: toradex.int
+            - name: SERVER_NAME
+              value: ota-ce.toradex.int
+            - name: AUTOPROV_SERVER_NAME
+              value: autoprov.dev2.inno
+
       dnsPolicy: "ClusterFirst"
 ---
 apiVersion: v1

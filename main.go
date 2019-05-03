@@ -14,7 +14,7 @@ import (
 	"archive/zip"
 	"os/exec"
 	"bytes"
-	"io"
+	//"io"
 	"github.com/satori/go.uuid"
 	//
 	// Uncomment to load all auth plugins
@@ -41,7 +41,7 @@ type Device struct {
 	ClientCertPem string
 }
 
-func createCredsZip() {
+func createCredsZip(zipBuf *bytes.Buffer) error {
 	var filesToZip []FileSource
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -125,9 +125,9 @@ func createCredsZip() {
 
 	// Create autoprov.url, tufrepo.url, and treehub.json from environment
 	dnsName := os.Getenv("DNS_NAME")
-	serverName := os.Getenv("SERVER_NAME")
+	autoProvServer := os.Getenv("AUTOPROV_SERVER_NAME")
 	     var tufrepoStr string = "http://api."+ dnsName +"/repo/"
-     var autoprovStr string = "https://"+ serverName +":30443"
+     var autoprovStr string = "https://"+ autoProvServer +":30443"
 	fmt.Printf("tufrepoStr is %s and autoprovStr is %s\n", tufrepoStr, autoprovStr)
 
 	filesToZip = append(filesToZip, FileSource{"autoprov.url", autoprovStr})
@@ -146,33 +146,32 @@ func createCredsZip() {
      }`
      filesToZip = append(filesToZip, FileSource{"treehub.json", treehubJson})
 
-    credentialsPath := os.Getenv("CREDENTIALS_DIR")
+    // credentialsPath := os.Getenv("CREDENTIALS_DIR")
     // Create the Zip File
-	zipFile, err := os.Create(path.Join(credentialsPath, "credentials.zip"))
-    if err != nil {
-        panic(err.Error())
-    }
-    defer zipFile.Close()
+	// zipFile, err := os.Create(path.Join(credentialsPath, "credentials.zip"))
+ //    if err != nil {
+ //        fmt.Printf("Failed to ")
+ //    }
+ //    defer zipFile.Close()
 
-	zipWriter := zip.NewWriter(zipFile)
+	zipWriter := zip.NewWriter(zipBuf)
 
 	for _, file := range filesToZip {
-		fmt.Printf("Adding " + file.Name + " to archive\n")
+		fmt.Printf("Adding %s to archive\n", file.Name)
 		f, err := zipWriter.Create(file.Name)
 		if err != nil {
-			panic(err.Error())
+			return err
 		}
 
 		_, err = f.Write([]byte(file.Body))
 		if err != nil {
-			panic(err.Error())
+			fmt.Printf("Failed to write out file: %s to zip archive\n", file.Name)
+			return err
 		}
 	}
 
 	err = zipWriter.Close()
-	if err != nil {
-		panic(err.Error())
-	}
+	return err
 }
 
 func createDevice() (Device, error) {
@@ -274,7 +273,7 @@ func createDevice() (Device, error) {
 		return dev, err
 	}
 	req.Header.Add("Content-Type", "application/json")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("Failed PUT Request to the device-registry\n")
@@ -298,10 +297,20 @@ func createDevice() (Device, error) {
 }
 
 func getCredentialsZip(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, "Reached getCredentialsZip" + "\n")
 	fmt.Printf("getCredentialsZip\n")
+
+	var zipBuf bytes.Buffer
+	err := createCredsZip(&zipBuf)
+
+	if err != nil {
+		fmt.Printf("createCredsZip failed: error: %s\n", err.Error());
+		w.Write([]byte("Command Failed. Error: " + err.Error()))
+	} else {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"credentials.zip\""))
+		//io.Copy(w, buf)
+		w.Write(zipBuf.Bytes())	
+	}
 }
 
 func newDevice(w http.ResponseWriter, r *http.Request) {
