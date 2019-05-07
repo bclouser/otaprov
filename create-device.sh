@@ -4,7 +4,11 @@
 
 set -euo pipefail
 
-readonly CWD=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [ -z ${DATA_PATH+x} ];then
+  echo "ERROR:  DATA_PATH is not set! This must be set in order to run this script"
+  exit -1
+fi
+
 readonly CERTS_DIR=${DATA_PATH}/certs
 readonly DEVICES_DIR=${DATA_PATH}/devices
 readonly NAMESPACE=${NAMESPACE:-default}
