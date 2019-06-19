@@ -252,12 +252,13 @@ func createDevice() (Device, error) {
 	type RequestBody struct {
 		Credentials string `json:"credentials"`
 		DeviceUUID string `json:"deviceUuid"`
+		Uuid string `json:"uuid"`
 		DeviceId string `json:"deviceId"`
 		DeviceName string `json:"deviceName"`
 		DeviceType string `json:"deviceType"`
 	}
 
-	requestBody := RequestBody{string(clientPem), id.String(), deviceId, deviceId, "Other"}
+	requestBody := RequestBody{string(clientPem), id.String(), id.String(), deviceId, deviceId, "Other"}
 	var jsonBody []byte
 	jsonBody, err = json.Marshal(requestBody)
 	if err != nil {
