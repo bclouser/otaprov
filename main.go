@@ -27,7 +27,13 @@ import (
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/openstack"
 )
 
+var dnsName string
+var autoProvServer string
 var dataPath string
+var reposerverSvcUrl string
+var keyserverSvcUrl string
+var directorSvcUrl string
+var registrySvcUrl string
 var devicesDir string
 var namespace string = "default"
 
@@ -53,6 +59,8 @@ type Credentials struct {
 	TufRepoUrl string
 	TreeHubJson string
 }
+
+
 
 
 /*
@@ -138,7 +146,7 @@ func createCredentials() (Credentials, error) {
 	creds.TargetsSec = string(privKeyJson)
 
 	// Collect root json directly from the reposerver API
-	response, err := http.Get("http://tuf-reposerver/api/v1/user_repo/root.json")
+	response, err := http.Get("http://"+reposerverSvcUrl+"/api/v1/user_repo/root.json")
 	if err != nil {
 		fmt.Printf(err.Error())
 		return creds, err
@@ -153,8 +161,6 @@ func createCredentials() (Credentials, error) {
 	creds.RootJson = string(rootJson)
 
 	// Create autoprov.url, tufrepo.url, and treehub.json from environment
-	dnsName := os.Getenv("DNS_NAME")
-	autoProvServer := os.Getenv("AUTOPROV_SERVER_NAME")
 
 	creds.AutoProvUrl = "https://"+ autoProvServer +":30443"
 	creds.TufRepoUrl = "http://api."+ dnsName +"/repo/"
@@ -269,7 +275,7 @@ func createDevice() (Device, error) {
 	fmt.Printf("Here is the json string: %s\n", string(jsonBody))
 
 	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodPut, "http://device-registry/api/v1/devices", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest(http.MethodPut, "http://"+registrySvcUrl+"/api/v1/devices", bytes.NewReader(jsonBody))
 	if err != nil {
 		fmt.Printf("Failed to create put request\n")
 		return dev, err
@@ -391,6 +397,12 @@ func handleNewDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	reposerverSvcUrl = os.Getenv("REPOSERVER_ENDPOINT")
+	keyserverSvcUrl = os.Getenv("KEYSERVER_ENDPOINT")
+	directorSvcUrl = os.Getenv("DIRECTOR_ENDPOINT")
+	registrySvcUrl = os.Getenv("REGISTRY_ENDPOINT")
+	dnsName = os.Getenv("DNS_NAME")
+	autoProvServer = os.Getenv("AUTOPROV_SERVER_NAME")
 	dataPath = os.Getenv("DATA_PATH")
 	devicesDir = path.Join(dataPath, "/devices")
 	http.HandleFunc("/credentials.zip", handleCredentialsZip)
