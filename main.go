@@ -395,5 +395,6 @@ func main() {
 	devicesDir = path.Join(dataPath, "/devices")
 	http.HandleFunc("/credentials.zip", handleCredentialsZip)
 	http.HandleFunc("/create-device", handleNewDevice)
+	fmt.Printf("Listening on port 8000\n")
 	http.ListenAndServe(":8000", nil)
 }
